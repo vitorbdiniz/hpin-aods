@@ -123,49 +123,33 @@ ggsave(file.path(fig_dir, "half_life.pdf"), hl_plot,
        width = 10, height = 6, units = "in")
 cat("half-life ok\n")
 
-# --- 7/8. PLS time series + boxplot ----------------------------------------
-PLS_HPIN <- read.csv(file.path(tab_dir, "PLS_HPIN.csv"))
-PLS_PIN  <- read.csv(file.path(tab_dir, "PLS_PIN.csv"))
-new_names <- c(" 60", " 90", " 120", " 150", " 180")
-names(PLS_HPIN)[2:6] <- new_names
-names(PLS_PIN)[2:6]  <- new_names
-PLS_PIN$Time  <- PLS_PIN[[1]]
-PLS_HPIN$Time <- PLS_HPIN[[1]]
+# --- 7. PLS: paired per-observation difference ------------------------------
+# The raw PLS levels are dominated by the common overdispersion shock, so the
+# informative object is the paired difference on each held-out observation.
+PLS_HPIN <- read.csv(file.path(tab_dir, "PLS_HPIN.csv"), row.names = 1)
+PLS_PIN  <- read.csv(file.path(tab_dir, "PLS_PIN.csv"), row.names = 1)
+stopifnot(identical(dim(PLS_HPIN), dim(PLS_PIN)))
+diff_mat <- PLS_HPIN - PLS_PIN
+names(diff_mat) <- as.character(windows)
 
-df_combined <- bind_rows(
-  PLS_PIN  %>% pivot_longer(all_of(new_names), names_to = "Window",
-                            values_to = "PLS_Value") %>% mutate(Model = "PIN"),
-  PLS_HPIN %>% pivot_longer(all_of(new_names), names_to = "Window",
-                            values_to = "PLS_Value") %>% mutate(Model = "HPIN")
-) %>% mutate(Window = factor(Window, levels = new_names)) %>%
-  filter(is.finite(PLS_Value))
+df_diff <- diff_mat %>%
+  pivot_longer(everything(), names_to = "Window", values_to = "Diff") %>%
+  filter(is.finite(Diff)) %>%
+  mutate(Window = factor(Window, levels = as.character(windows)))
 
-pls_plot <- ggplot(df_combined, aes(x = Time, y = PLS_Value, color = Model,
-                                    group = Model)) +
-  geom_line(alpha = 0.7, linewidth = 0.5) +
-  geom_point(size = 0.5) +
-  facet_wrap(~ Window, nrow = 3, ncol = 2, scales = "fixed",
-             labeller = labeller(Window = function(x) paste0("Window size: ", x))) +
-  scale_color_manual(values = color_dict, name = "Model") +
+pls_diff_plot <- ggplot(df_diff, aes(x = Window, y = Diff)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey30") +
+  geom_boxplot(fill = color_dict[["HPIN"]], alpha = 0.75, width = 0.6,
+               outlier.alpha = 0.25, outlier.size = 0.5, lwd = 0.3) +
+  coord_cartesian(ylim = quantile(df_diff$Diff, c(0.02, 0.98))) +
   theme_minimal(base_size = 12) +
-  labs(x = "Observation", y = "PLS") +
-  theme(strip.text = element_text(size = 10, face = "bold"),
-        legend.position = "bottom")
-ggsave(file.path(fig_dir, "PLS.pdf"), pls_plot, width = 7.5, height = 5, units = "in")
-
-pls_boxplot <- ggplot(df_combined, aes(x = Window, y = PLS_Value, fill = Model)) +
-  geom_boxplot(position = position_dodge(width = 0.8), width = 0.7,
-               outlier.alpha = 0.5, lwd = 0.3) +
-  scale_fill_manual(values = color_dict, name = "Model") +
-  theme_minimal(base_size = 12) +
-  labs(x = "Window size", y = "PLS", fill = "Model") +
-  theme(legend.position = "bottom",
-        panel.grid.major.x = element_blank(),
+  labs(x = "Window size", y = "PLS difference (HPIN - PIN)") +
+  theme(panel.grid.major.x = element_blank(),
         panel.grid.major.y = element_line(color = "grey90", linewidth = 0.3),
         plot.background = element_rect(fill = "white", color = NA))
-ggsave(file.path(fig_dir, "PLS_Boxplot.pdf"), pls_boxplot,
+ggsave(file.path(fig_dir, "PLS_diff_boxplot.pdf"), pls_diff_plot,
        width = 7.5, height = 4.5, units = "in")
-cat("pls ok\n")
+cat("pls difference ok\n")
 
 # --- 9. transition metrics --------------------------------------------------
 load_and_tidy <- function(model, w) {
@@ -197,3 +181,49 @@ transition_plot <- ggplot(df_tm, aes(x = Window, y = Value, fill = Model)) +
 ggsave(file.path(fig_dir, "markov_dynamics_metrics.pdf"), transition_plot,
        width = 7.5, height = 5.5, units = "in")
 cat("transition metrics ok\n")
+
+# --- 10. Persistence grid: estimated vs true spectral gap -------------------
+grid_file <- file.path(tab_dir, "persistence_grid.csv")
+if (file.exists(grid_file)) {
+  g <- read.csv(grid_file)
+  g <- g[g$window == 180, ]
+  g$dgp_label <- ifelse(g$dgp == "clean", "Correctly specified",
+                        "Overdispersed emissions")
+
+  hpin_pts <- data.frame(true = g$spectral_gap_true, est = g$gap_hpin,
+                         dgp_label = g$dgp_label, Model = "HPIN")
+  pin_pts <- data.frame(true = g$spectral_gap_true, est = 1.0,
+                        dgp_label = g$dgp_label, Model = "PIN")
+  pts <- rbind(hpin_pts, pin_pts)
+
+  grid_plot <- ggplot(pts, aes(x = true, y = est, color = Model, shape = Model)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_line(linewidth = 0.6) +
+    geom_point(size = 2.2) +
+    facet_wrap(~ dgp_label, nrow = 1) +
+    scale_color_manual(values = color_dict, name = "Model") +
+    scale_shape_manual(values = c("HPIN" = 16, "PIN" = 17), name = "Model") +
+    coord_equal(xlim = c(0, 1.02), ylim = c(0, 1.02)) +
+    theme_minimal(base_size = 12) +
+    labs(x = "True spectral gap  (1 - rho)", y = "Estimated spectral gap") +
+    theme(strip.text = element_text(size = 10, face = "bold"),
+          panel.grid.minor = element_blank(),
+          legend.position = "bottom",
+          plot.background = element_rect(fill = "white", color = NA))
+  ggsave(file.path(fig_dir, "persistence_grid.pdf"), grid_plot,
+         width = 7.5, height = 4.2, units = "in")
+  cat("persistence grid ok\n")
+} else {
+  cat("persistence grid SKIPPED (run persistence_grid.py aggregate first)\n")
+}
+
+# --- copy figures into the manuscript directory, when present ---------------
+paper_dir <- file.path(here, "..", "..", "paper")
+if (dir.exists(paper_dir)) {
+  pdfs <- list.files(fig_dir, pattern = "\\.pdf$", full.names = TRUE)
+  ok <- file.copy(pdfs, paper_dir, overwrite = TRUE)
+  cat(sprintf("copied %d/%d figures to %s\n", sum(ok), length(pdfs),
+              normalizePath(paper_dir)))
+} else {
+  cat("paper directory not present; figures left in results/figs\n")
+}
