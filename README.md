@@ -29,6 +29,26 @@ All experiments are seeded (data generation: 42; bootstrap: 7; sensitivity: 123)
 | 5 | `04_analysis.ipynb` | All tables: metrics, Wilcoxon tests, initialization sensitivity, fairness check |
 | 6 | `Rscript make_figures.R` | All paper figures into `results/figs/` |
 
+### Persistence grid (paper §5.4)
+
+`persistence_grid.py` builds the one-parameter family Γ(ρ) = (1−ρ)·𝟙u + ρ·I,
+whose stationary distribution — and therefore the unconditional PIN — is
+identical for every ρ, and whose spectral gap is exactly 1−ρ. Six environments
+(ρ ∈ {0, 0.2, 0.45, 0.6, 0.8, 0.9}) are generated twice: with the
+Inverse-Gaussian overdispersion factor and without it.
+
+```
+python persistence_grid.py generate        # overdispersed grid
+python persistence_grid.py generate-clean  # correctly specified grid
+python persistence_grid.py hpin            # rolling HPIN, overdispersed
+python persistence_grid.py hpin-clean      # rolling HPIN, correctly specified
+Rscript run_pin_classic.R fluxos_sinteticos_rho000 ...   # classical baseline
+python persistence_grid.py aggregate       # -> results/tables/persistence_grid.csv
+```
+
+The classical-PIN step over the grid takes several hours; its outputs are
+committed under `data/pins/`, so the aggregation can be run directly.
+
 ## Layout
 
 - `code/hpin.py` — model, tied Baum–Welch, predictive scores (paper Alg. 1 + App. A)
