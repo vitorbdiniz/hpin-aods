@@ -90,7 +90,7 @@ def transition_entropy(G, u=None, normalize=True):
     G = np.asarray(G, dtype=float)
     G = G / G.sum(axis=1, keepdims=True)
     u = stationary_distribution(G) if u is None else u
-    logG = np.where(G > 0, np.log(G), 0.0)
+    logG = np.log(G, out=np.zeros_like(G), where=(G > 0))
     H = -float(np.sum(u[:, None] * G * logG))
     return H / np.log(G.shape[0]) if normalize else H
 
